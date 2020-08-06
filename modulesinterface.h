@@ -16,5 +16,5 @@ public:
 protected:
     IFrame* m_framectrl;
 };
-
+///////////
 #endif // MODULESINTERFACE_H
