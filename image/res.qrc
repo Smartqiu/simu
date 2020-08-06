@@ -1,0 +1,22 @@
+<RCC>
+    <qresource prefix="/">
+        <file>menu_about.png</file>
+        <file>menu_option.png</file>
+        <file>top_close_b.png</file>
+        <file>top_min_b.png</file>
+        <file>1.png</file>
+        <file>close.jpg</file>
+        <file>bj.png</file>
+        <file>t.png</file>
+        <file>music-player-2951399_1280.jpg</file>
+        <file>fullscreen.png</file>
+        <file>minimize.png</file>
+        <file>settings.png</file>
+        <file>turn_off.png</file>
+        <file>true.jpg</file>
+        <file>preview_256px_1117076_easyicon.net.png</file>
+        <file>beijing1.jpg</file>
+        <file>beijing2.jpg</file>
+        <file>beijing3.jpg</file>
+    </qresource>
+</RCC>
