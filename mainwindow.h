@@ -5,7 +5,7 @@
 #include "mainwindow.h"
 #include <QPoint>
 #include "modulesmanager.h"
-#include <QMap>
+#include <QHash>
 #include <QLibrary>
 #include <QVBoxLayout>
 #include <QResizeEvent>
@@ -14,27 +14,15 @@
 #include <udpsocket.h>
 #include "csysctrl.h"
 #include <QTreeWidget>
+#include <QVector>
 
-#define cout qDebug() << "[" << __FILE__ << ":" << __LINE__ << "]"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
 }
 QT_END_NAMESPACE
-//方向枚举
-enum enum_Direction
-{
-   eNone,
-   eTop = 1,
-   eRight =2 ,
-   eBottom =4,
-   eLeft = 8,
-   eTopRight = eTop + eRight,
-   eRightBottom = eRight + eBottom,
-   eBottomLeft = eBottom + eLeft,
-   eLeftTop = eLeft + eTop
-};
+
 class  Form;
 
 class MainWindow : public QMainWindow
@@ -46,28 +34,34 @@ public:
     ~MainWindow();
 
     void on_newsend_clicked();
-
     QString getIP();
     void dealMsg();//槽函数，处理对方发过来的数据（槽函数的形式与信号保持一致，没有参数）
 
     void sendfunc(QString ip, QString port, QString content);
+
+    QVector< QString >hadState;
+
+    int ipsame = -1; //每次到来的ip是否相同
+    int ips = -1;
+    int minandmax=0;
+    int btn5 = 1;
+
+    QHash<QString,int> m_time;
+    QTimer *time;
+    virtual void timerEvent(QTimerEvent *event); //定时器
 
 signals:
     void sigRefreshTable();
 public slots:
     void slotReloadModule(QString path);
 
-    void showSelectedImage(QTreeWidgetItem * item); //点击树节点事件, int column
+
 
 private:
     void LoadQSS();
     QString LoadModule(QString& path);
     void LoadModulesFromCfg();
 
-    void SetCursorStyle(enum_Direction direction);
-
-    enum_Direction PointValid(int nXRelative,int nYRelative);
-    void SetDrayMove(int nXGlobal,int nYGlobal,enum_Direction direction);
     void UnloadModule(QString &path);
 
     void setBackgroundImage(QPixmap &pixmap);
@@ -99,13 +93,12 @@ private:
     QUdpSocket qus;
 
     QString itinfo;
-    enum_Direction m_eDirection;
     QWidget *mWidget;
 
 public slots:
-    //void receive();
+
 private slots:
-    void on_toolButton_5_clicked();
+
 
 
 protected:

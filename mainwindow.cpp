@@ -25,16 +25,19 @@
 #include <QObject>
 #include <modulesinterface.h>
 #include <QNetworkInterface>
-
+#include <QTimer>
+#include <QTime>
+#include <vector>
 #define VALUE_DIS 5
 
-
+#define qout qDebug()
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
 //////////////////////////////////////////////////////////////////////////////
     //固定大小
     resize(1400,900);
@@ -47,20 +50,39 @@ MainWindow::MainWindow(QWidget *parent) :
     //最小化
     connect(ui->minbtn,&QPushButton::clicked,this,&MainWindow::showMinimized);
     //最大化,再次点击恢复窗口大小
-    int i=0;
     connect(ui->maxbtn,&QPushButton::clicked,this,[&](){
-        if(i%2==0)
+        if(minandmax==0)
         {
-             connect(ui->maxbtn,&QPushButton::clicked,this,&MainWindow::showMaximized);
-             i++;
+            connect(ui->maxbtn,&QPushButton::clicked,this,&MainWindow::showMaximized);
+            minandmax = 1;
         }
         else
         {
             connect(ui->maxbtn,&QPushButton::clicked,this,&MainWindow::showNormal);
-            i++;
+            minandmax = 0;
         }
-     });
-///////////////////////////////////////////////////
+    });
+
+    // 管理员按钮点击显示或隐藏状态信息
+    ui->stackedWidget_2->setCurrentIndex(0);
+    connect(ui->toolButton_5,&QToolButton::clicked,this,[&](){
+        if(btn5 == 0)
+        {
+            connect(ui->toolButton_5,&QToolButton::clicked,[&](){
+                ui->stackedWidget_2->setCurrentIndex(btn5);
+            });
+            btn5 = 1;
+        }
+        else
+        {
+            connect(ui->toolButton_5,&QPushButton::clicked,[&](){
+                ui->stackedWidget_2->setCurrentIndex(btn5);
+            });
+            btn5 = 0;
+        }
+    });
+
+//////////////////////////////////////////////////////////////////////
 
 
     //初始显示第0页
@@ -70,7 +92,7 @@ MainWindow::MainWindow(QWidget *parent) :
     ft.setPointSize(12);
     ui->label_5->setFont(ft);
 
-////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////
 
 
     //模块加载配置对话框初始化
@@ -92,17 +114,20 @@ MainWindow::MainWindow(QWidget *parent) :
         mdlg->show();
     });
 
-/////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////
     //创建socket
     udpSocket = new QUdpSocket(this);
     //组播的绑定
     udpSocket->bind(QHostAddress::AnyIPv4,21778);//,QUdpSocket::ShareAddress
     //加入组播
     udpSocket->joinMulticastGroup(QHostAddress("224.0.0.2"));
+
     connect(udpSocket, &QUdpSocket::readyRead, this, &MainWindow::dealMsg);
+    //每秒发送计时信号，各个报文消息生存时间减少
+    startTimer(1000);
 
     //双击目标方法进行回调处理
-    connect(ui->treeWidget,SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)),this,SLOT(showSelectedImage(QTreeWidgetItem*)));
+//    connect(ui->treeWidget,SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)),this,SLOT(showSelectedImage(QTreeWidgetItem*)));
 
 }
 //////////////////////////////MainWindow结束！！！！/////////////////////////////////////
@@ -113,19 +138,84 @@ QString MainWindow::getIP()  //获取本机ip地址
     QList<QHostAddress> list = QNetworkInterface::allAddresses();
     foreach (QHostAddress address, list)
     {
-       if(address.protocol() == QAbstractSocket::IPv4Protocol)//我们使用IPv4地址
+        if(address.protocol() == QAbstractSocket::IPv4Protocol)//我们使用IPv4地址
             return address.toString();
     }
-       return 0;
+    return 0;
 }
+
+//每秒处理，超过5s删除报文以及tree中数据
+void MainWindow::timerEvent(QTimerEvent *event)
+{
+    //当前报文和他的剩余生存时间
+    QHash<QString,int>::iterator nowtime;
+    for( nowtime=m_time.begin(); nowtime!=m_time.end(); ++nowtime)
+    {
+        nowtime.value()--;
+
+
+        if(nowtime.value() == 0) //如果生存时间为0，则清除本条报文
+        {
+            int index = hadState.indexOf(nowtime.key());
+            QStringList delmod = nowtime.key().split("#");
+
+            //用 it 遍历treewidget
+            QTreeWidgetItemIterator it(ui->treeWidget);
+            while (*it)
+            {
+                if(delmod[0] == (*it)->text(0) ) //如果此时报文ip和当前指向的节点一样
+                {
+                    if(  (*it)->childCount() == 0 || (*it)->childCount() == 1 ) //剩余一个和0个子节点都要清除整个ip
+                    {
+                        int con = 0;
+                        for(int n=0;n<ui->treeWidget->topLevelItemCount();n++)
+                        {
+                            if((*it) == ui->treeWidget->topLevelItem(n))
+                            {
+                                con = n;
+                            }
+                        }
+                        ui->treeWidget->takeTopLevelItem(con);
+                        hadState.remove(index);
+                        m_time.remove(nowtime.key());
+                        return;
+                    }
+                    else // 剩余多个子节点时只需删除一个
+                    {
+                        for(int modindex = 0; modindex < (*it)->childCount() ;modindex++)
+                        {
+                            if(delmod[1] == (*it)->child(modindex)->text(0) )
+                            {
+                                (*it)->removeChild((*it)->child(modindex));
+                                hadState.remove(index);
+                                m_time.remove(nowtime.key());
+                                return;
+                            }
+                        }
+                    }
+                }
+                ++it;
+            }
+
+            hadState.remove(index);
+            m_time.remove(nowtime.key());
+        }
+    }
+}
+
 
 //接受模块发来的状态消息，添加到tree中
 void MainWindow::dealMsg()
 {
-
     QByteArray ba;
-    qDebug() << "dealmsg ok";
-    ui->treeWidget->setHeaderLabels(QStringList() << "方法名称" << "状态");
+    ui->treeWidget->setHeaderLabels(QStringList() << "方法名称" << " "<< " "<< "状态");
+    //设置状态栏间隔
+    ui->treeWidget->setColumnWidth(0,175);
+    ui->treeWidget->setColumnWidth(1,50);
+    ui->treeWidget->setColumnWidth(2,50);
+    ui->treeWidget->setColumnWidth(3,125);
+    //默认展开
+//    ui->treeWidget->expandAll();
 
     while(udpSocket->hasPendingDatagrams())
     {
@@ -133,63 +223,165 @@ void MainWindow::dealMsg()
         ba.resize(udpSocket->pendingDatagramSize());
         udpSocket->readDatagram(ba.data(), ba.size());
         QString itinfo = ba.data();
-
-        qDebug() << "接收了：" << ba.data();
-
+        qDebug() << "接收了：" <<  itinfo;
         QStringList iteminfolist = itinfo.split("#");
+        if(hadState.indexOf(itinfo) >= 0 )// 存在相同直接退出
+        {
+            m_time[itinfo] = 5;//生存时间重置
+            return;
+        }
+        else//信息存在不同，分为ip不同，模块名不同，函数名不同
+        {
+            for(int i=0;i<hadState.count();i++)//判断ip是否存在相同
+            {
+                QStringList hadstateip = hadState[i].split("#");
+                if(hadstateip[0] == iteminfolist[0])
+                    ipsame = i;
+                else
+                    ipsame = -1;
+            }
+
+            if(ipsame >= 0)//ip相同
+            {
+                for(int i=0;i<hadState.count();i++)//判断ip是否存在相同
+                {
+                    QStringList olditem = hadState[i].split("#");
+                    if(olditem[1] == iteminfolist[1])
+                        ips = i;
+                    else
+                        ips = -1;
+                }
+
+                if(ips >= 0 )//模块名相同，证明功能不同，更新功能列表
+                {
+                    ui->treeWidget->clear();
+                    hadState.remove(ips);
+                    return;
+                }
+                else //模块名不同，新添加模块
+                {
+                    qDebug() << "添加新模块";
+                    //添加模块、功能、功能所携带的按钮
+                    QTreeWidgetItemIterator it(ui->treeWidget);
+                    while (*it)
+                    {
+                        QString h = QString(iteminfolist[0]);
+                        if((*it)->text(0) == h )
+                        {
+                            QTreeWidgetItem* mod = new QTreeWidgetItem(QStringList(iteminfolist[1]));
+                            QTreeWidgetItem *nowipitem = *it;
+                            nowipitem->addChild(mod);
+                            for(int i = 1; i < iteminfolist[2].toInt()+1; ++i)
+                            {
+                                QTreeWidgetItem* funandState = new QTreeWidgetItem(QStringList(iteminfolist[i + 2]));
+                                mod->addChild(funandState);
+
+                                QPushButton *topLevelButton = new QPushButton(" 开启 ");
+                                topLevelButton->resize(5,10);
+                                QPushButton *topLevelButton2 = new QPushButton(" 关闭 ");
+                                topLevelButton2->resize(5,5);
+
+                                //设置 Item 内控件，0 是第几列
+                                ui->treeWidget->setItemWidget(funandState, 1, topLevelButton);
+                                ui->treeWidget->setItemWidget(funandState, 2, topLevelButton2);
+                                //开启
+                                connect(topLevelButton,&QPushButton::clicked,this,[=](){
+
+                                    QPushButton *sendObj = qobject_cast<QPushButton*>(sender());
+                                    QTreeWidgetItem *item = ui->treeWidget->itemAt(QPoint(sendObj->frameGeometry().x(),sendObj->frameGeometry().y()));
+
+                                    QString nowip = item->parent()->parent()->text(0);
+
+                                    QString nowfuncmes = item->text(0);
+
+                                    MainWindow::sendfunc(nowip,"2000",nowfuncmes+"#1");
+                                });
+                                //关闭
+                                connect(topLevelButton2,&QPushButton::clicked,this,[=](){
+
+                                    QPushButton *sendObj = qobject_cast<QPushButton*>(sender());
+                                    QTreeWidgetItem *item = ui->treeWidget->itemAt(QPoint(sendObj->frameGeometry().x(),sendObj->frameGeometry().y()));
+
+                                    QString nowip = item->parent()->parent()->text(0);
+
+                                    QString nowfuncmes = item->text(0);
+
+                                    MainWindow::sendfunc(nowip,"2000",nowfuncmes+"#0");
+                                });
+                            }
+                            hadState << itinfo;
+                            m_time.insert(itinfo,5);
+                            return;
+                        }
+                        ++it;
+                    }
+                    return;
+                }
+            }
+
+            hadState << itinfo;
+            m_time.insert(itinfo,5);
+        }
+        //添加一整个ip、模块、功能；
         QTreeWidgetItem* ip = new QTreeWidgetItem(QStringList(iteminfolist[0]));
         ui->treeWidget->addTopLevelItem(ip);
-        for(int i = 0; i < iteminfolist[1].toInt(); ++i)
+
+        QTreeWidgetItem* modl = new QTreeWidgetItem(QStringList(iteminfolist[1]));
+        ip->addChild(modl);
+        for(int i = 1; i < iteminfolist[2].toInt()+1; ++i)
         {
             QTreeWidgetItem* funandState = new QTreeWidgetItem(QStringList(iteminfolist[i + 2]));
-            ip->addChild(funandState);
-
+            modl->addChild(funandState);
+            QPushButton *topLevelButton = new QPushButton(" 开启 ");
+            topLevelButton->resize(5,10);
+            QPushButton *topLevelButton2 = new QPushButton(" 关闭 ");
+            topLevelButton2->resize(5,5);
+            //设置 Item 内控件，0 是第几列
+            ui->treeWidget->setItemWidget(funandState, 1, topLevelButton);
+            ui->treeWidget->setItemWidget(funandState, 2, topLevelButton2);
+            //开启
+            connect(topLevelButton,&QPushButton::clicked,this,[=](){
+                QPushButton *sendObj = qobject_cast<QPushButton*>(sender());
+                QTreeWidgetItem *item = ui->treeWidget->itemAt(QPoint(sendObj->frameGeometry().x(),sendObj->frameGeometry().y()));
+                QString nowip = item->parent()->parent()->text(0);
+                QString nowfuncmes = item->text(0);
+                MainWindow::sendfunc(nowip,"2000",nowfuncmes+"#1");
+            });
+            //关闭
+            connect(topLevelButton2,&QPushButton::clicked,this,[=](){
+                QPushButton *sendObj = qobject_cast<QPushButton*>(sender());
+                QTreeWidgetItem *item = ui->treeWidget->itemAt(QPoint(sendObj->frameGeometry().x(),sendObj->frameGeometry().y()));
+                QString nowip = item->parent()->parent()->text(0);
+                QString nowfuncmes = item->text(0);
+                MainWindow::sendfunc(nowip,"2000",nowfuncmes+"#0");
+            });
         }
-
     }
-
 }
 
-//得到鼠标当前的功能名称和父亲ip
-void MainWindow::showSelectedImage(QTreeWidgetItem *item)//, int column
-{
-    QTreeWidgetItem *parent = item->parent();
-    if(NULL==parent) //注意：最顶端项是没有父节点的
-        return;
 
-    //点击时，当前index为0；
-    QString nowip = item->parent()->text(0);
 
-    QString nowfuncmes = item->text(0);
+////得到鼠标当前的功能名称和父亲ip
+//void MainWindow::showSelectedImage(QTreeWidgetItem *item)//, int column
+//{
+//    QTreeWidgetItem *parent = item->parent();
+//    if(NULL==parent) //注意：最顶端项是没有父节点的
+//        return;
+//    //点击时，当前index为0；
+//    QString nowip = item->parent()->text(0);
+//    QString nowfuncmes = item->text(0);
+//    MainWindow::sendfunc(nowip,"2000",nowfuncmes);
 
-    MainWindow::sendfunc(nowip,"2000",nowfuncmes);
+//}
 
-}
 
-//发送鼠标双击的函数到对应的ip去，目标模块回调功能；
+//发送函数到对应的ip去，目标模块回调功能；
 void MainWindow::sendfunc(QString ip, QString port, QString content)
 {
     QUdpSocket qus;
-    ip = "224.0.0.2";
+    ip = "224.0.0.2";                  ////////////////////////////////////////////////////////这里的ip还有问题
     qus.writeDatagram(content.toUtf8(), QHostAddress(ip), port.toShort());
-    qDebug() << "成功" << content << ip;
-}
-
-//管理员按钮，暂时起测试作用，没用
-void MainWindow::on_toolButton_5_clicked()
-{
-
-    //itinfo = MainWindow::getIP()+"#3"+"#功能1#功能2#功能3";
-    QString n = "127.0.0.1";
-    itinfo = n+"#3"+"#功能1#功能2#功能3";
-    QString port = "21778";
-    udpSocket->writeDatagram(itinfo.toUtf8(), QHostAddress("224.0.0.2"), port.toShort());
-
-    n = "333.213.321.456";
-    itinfo = n+"#3"+"#功能1#功能2#功能3";
-    udpSocket->writeDatagram(itinfo.toUtf8(), QHostAddress("224.0.0.2"), port.toShort());
-
-    qDebug() <<  " fasong ok!111" ;
+    qDebug() << "成功" << content ;
 }
 
 
@@ -328,7 +520,7 @@ QString MainWindow::LoadModule(QString &path)
     btn->resize(150,80);//按钮大小
     btn->setIconSize(QSize(100,50));
 
-//  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     if(btnar<=6)
     {
         btn->move(btnar*150,80);//位置
@@ -345,7 +537,7 @@ QString MainWindow::LoadModule(QString &path)
     int a=btnar;
     ui->stackedWidget->setCurrentIndex(0);//指定index0为初始界面
     connect(btn,&QPushButton::clicked,[=](){
-       ui->stackedWidget->setCurrentIndex(a-1);
+        ui->stackedWidget->setCurrentIndex(a-1);
     });
 
     btnar++;
@@ -489,15 +681,15 @@ void MainWindow::setBackgroundImage(QPixmap &pixmap)
 {
     //判断图片是否为空
     if(pixmap.isNull()){
-        qDebug() << tr("illege arguments") <<endl;
+
         return;
     }
     //设置窗口的背景
     QPalette    palette = this->palette();
     palette.setBrush(this->backgroundRole(),
                      QBrush(pixmap.scaled(this->size(),
-                            Qt::IgnoreAspectRatio,
-                            Qt::SmoothTransformation)));
+                                          Qt::IgnoreAspectRatio,
+                                          Qt::SmoothTransformation)));
 
     this->setPalette(palette);
 }
@@ -537,8 +729,6 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 
     move(x() + dx, y() + dy);
 }
-
-
 
 
 
